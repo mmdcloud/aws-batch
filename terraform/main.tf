@@ -130,7 +130,7 @@ module "ecr" {
   force_delete         = true
   scan_on_push         = false
   image_tag_mutability = "IMMUTABLE"
-  bash_command         = ""
+  bash_command         = "bash ${path.module}/../src/artifact_push.sh ${var.region}"
   name                 = "batch_job"
 }
 
@@ -156,7 +156,7 @@ resource "aws_batch_compute_environment" "batch_compute" {
 }
 
 resource "aws_iam_role" "ecs_task_execution_role" {
-  name               = "tf_test_batch_exec_role"
+  name               = "ecs_task_execution_role"
   assume_role_policy = data.aws_iam_policy_document.assume_role_policy.json
 }
 
