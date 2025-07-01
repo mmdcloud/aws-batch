@@ -1,3 +1,7 @@
+data "vault_generic_secret" "redshift" {
+  path = "secret/redshift"
+}
+
 data "aws_iam_policy_document" "batch_assume_role" {
   statement {
     effect = "Allow"
@@ -21,7 +25,9 @@ resource "aws_iam_role_policy_attachment" "aws_batch_service_role" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole"
 }
 
+# -----------------------------------------------------------------------------------------
 # VPC Configuration
+# -----------------------------------------------------------------------------------------
 module "vpc" {
   source                = "./modules/vpc/vpc"
   vpc_name              = "vpc"
@@ -40,6 +46,32 @@ module "security_group" {
     {
       from_port       = 0
       to_port         = 0
+      protocol        = "tcp"
+      self            = "false"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+      description     = "any"
+    }
+  ]
+  egress = [
+    {
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  ]
+}
+
+# Redshift Security Group
+module "redshift_sg" {
+  source = "./modules/vpc/security_groups"
+  vpc_id = module.vpc.vpc_id
+  name   = "redshift-sg"
+  ingress = [
+    {
+      from_port       = 5439
+      to_port         = 5439
       protocol        = "tcp"
       self            = "false"
       cidr_blocks     = ["0.0.0.0/0"]
@@ -125,6 +157,9 @@ module "private_rt" {
   vpc_id  = module.vpc.vpc_id
 }
 
+# -----------------------------------------------------------------------------------------
+# ECR Configuration
+# -----------------------------------------------------------------------------------------
 module "ecr" {
   source               = "./modules/ecr"
   force_delete         = true
@@ -134,6 +169,49 @@ module "ecr" {
   name                 = "batch_job"
 }
 
+# -----------------------------------------------------------------------------------------
+# Secrets Manager
+# -----------------------------------------------------------------------------------------
+module "db_credentials" {
+  source                  = "./modules/secrets-manager"
+  name                    = "rds-secrets"
+  description             = "rds-secrets"
+  recovery_window_in_days = 0
+  secret_string = jsonencode({
+    username = tostring(data.vault_generic_secret.redshift.data["username"])
+    password = tostring(data.vault_generic_secret.redshift.data["password"])
+  })
+}
+
+# -----------------------------------------------------------------------------------------
+# Redshift Configuration
+# -----------------------------------------------------------------------------------------
+module "redshift_serverless" {
+  source              = "./modules/redshift"
+  namespace_name      = "batch-namespace"
+  admin_username      = tostring(data.vault_generic_secret.redshift.data["username"])
+  admin_user_password = tostring(data.vault_generic_secret.redshift.data["password"])
+  db_name             = "records"
+  workgroups = [
+    {
+      workgroup_name      = "batch-workgroup"
+      base_capacity       = 128
+      publicly_accessible = false
+      subnet_ids          = module.public_subnets.subnets[*].id
+      security_group_ids  = [module.redshift_sg.id]
+      config_parameters = [
+        {
+          parameter_key   = "enable_user_activity_logging"
+          parameter_value = "true"
+        }
+      ]
+    }
+  ]
+}
+
+# -----------------------------------------------------------------------------------------
+# Batch Configuration
+# -----------------------------------------------------------------------------------------
 resource "aws_batch_compute_environment" "batch_compute" {
   compute_environment_name = "batch-compute"
   compute_resources {
@@ -187,31 +265,46 @@ resource "aws_iam_role_policy_attachment" "ecs_cloudwatch_logs" {
 }
 
 resource "aws_batch_job_definition" "batch_job_definition" {
-  name = "batch-job-definition"
-  type = "container"
-
+  name                  = "batch-job-definition"
+  type                  = "container"
   platform_capabilities = ["FARGATE"]
-
   container_properties = jsonencode({
-    command    = ["echo", "Hello AWS Batch"],
-    image      = "busybox",
+    image = "${module.ecr.repository_url}:latest",
+    environment = [
+      {
+        name  = "REDSHIFT_DBNAME"
+        value = "records"
+      },
+      {
+        name  = "REDSHIFT_USER"
+        value = tostring(data.vault_generic_secret.redshift.data["username"])
+      },
+      {
+        name  = "REDSHIFT_PASSWORD"
+        value = tostring(data.vault_generic_secret.redshift.data["password"])
+      },
+      {
+        name  = "REDSHIFT_HOST"
+        value = ""
+      },
+      {
+        name  = "REDSHIFT_PORT"
+        value = "5439"
+      }
+    ]
     jobRoleArn = aws_iam_role.ecs_task_execution_role.arn,
-
     fargatePlatformConfiguration = {
       platformVersion = "LATEST"
     },
-
     resourceRequirements = [
       { type = "VCPU", value = "0.25" },
       { type = "MEMORY", value = "512" }
     ],
 
     executionRoleArn = aws_iam_role.ecs_task_execution_role.arn,
-
     networkConfiguration = {
       assignPublicIp = "ENABLED"
     },
-
     logConfiguration = {
       logDriver = "awslogs",
       options = {
