@@ -213,7 +213,7 @@ module "redshift_serverless" {
 # Batch Configuration
 # -----------------------------------------------------------------------------------------
 resource "aws_batch_compute_environment" "batch_compute" {
-  compute_environment_name = "batch-compute"
+  name = "batch-compute"  
   compute_resources {
     max_vcpus = 16
 
