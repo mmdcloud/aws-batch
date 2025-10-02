@@ -160,6 +160,7 @@ module "private_rt" {
 # -----------------------------------------------------------------------------------------
 # ECR Configuration
 # -----------------------------------------------------------------------------------------
+
 module "ecr" {
   source               = "./modules/ecr"
   force_delete         = true
@@ -172,6 +173,7 @@ module "ecr" {
 # -----------------------------------------------------------------------------------------
 # Secrets Manager
 # -----------------------------------------------------------------------------------------
+
 module "db_credentials" {
   source                  = "./modules/secrets-manager"
   name                    = "rds-secrets"
@@ -186,6 +188,7 @@ module "db_credentials" {
 # -----------------------------------------------------------------------------------------
 # Redshift Configuration
 # -----------------------------------------------------------------------------------------
+
 module "redshift_serverless" {
   source              = "./modules/redshift"
   namespace_name      = "batch-namespace"
@@ -212,6 +215,7 @@ module "redshift_serverless" {
 # -----------------------------------------------------------------------------------------
 # Batch Configuration
 # -----------------------------------------------------------------------------------------
+
 resource "aws_batch_compute_environment" "batch_compute" {
   name = "batch-compute"  
   compute_resources {
