@@ -218,7 +218,7 @@ module "redshift_serverless" {
     {
       workgroup_name      = "batch-workgroup"
       base_capacity       = 128
-      publicly_accessible = false
+      publicly_accessible = true
       subnet_ids          = module.public_subnets.subnets[*].id
       security_group_ids  = [module.redshift_sg.id]
       config_parameters = [
@@ -244,11 +244,8 @@ resource "aws_batch_compute_environment" "batch_compute" {
       module.security_group.id
     ]
 
-    subnets = [
-      module.public_subnets.subnets[0].id
-    ]
-
-    type = "FARGATE"
+    subnets = module.public_subnets.subnets[*].id
+    type    = "FARGATE"
   }
 
   service_role = aws_iam_role.aws_batch_service_role.arn
@@ -287,6 +284,25 @@ resource "aws_iam_role_policy_attachment" "ecs_cloudwatch_logs" {
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
 }
 
+resource "aws_iam_role_policy" "secrets_manager_access" {
+  name = "secrets_manager_access"
+  role = aws_iam_role.ecs_task_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = module.db_credentials.arn
+      }
+    ]
+  })
+}
+
 resource "aws_batch_job_definition" "batch_job_definition" {
   name                  = "batch-job-definition"
   type                  = "container"
@@ -299,12 +315,8 @@ resource "aws_batch_job_definition" "batch_job_definition" {
         value = "records"
       },
       {
-        name  = "REDSHIFT_HOST"
-        value = module.redshift_serverless.endpoint
-      },
-      {
-        name  = "REDSHIFT_PORT"
-        value = "5439"
+        name  = "REDSHIFT_SECRET_NAME"
+        value = module.db_credentials.name
       }
     ]
     jobRoleArn = aws_iam_role.ecs_task_execution_role.arn,
