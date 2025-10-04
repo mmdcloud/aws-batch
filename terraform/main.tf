@@ -1,6 +1,15 @@
+
+# -----------------------------------------------------------------------------------------
+# Registering vault provider 
+# -----------------------------------------------------------------------------------------
+
 data "vault_generic_secret" "redshift" {
   path = "secret/redshift"
 }
+
+# -----------------------------------------------------------------------------------------
+# IAM role for batch 
+# -----------------------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "batch_assume_role" {
   statement {
@@ -28,6 +37,7 @@ resource "aws_iam_role_policy_attachment" "aws_batch_service_role" {
 # -----------------------------------------------------------------------------------------
 # VPC Configuration
 # -----------------------------------------------------------------------------------------
+
 module "vpc" {
   source                = "./modules/vpc/vpc"
   vpc_name              = "vpc"
@@ -186,6 +196,15 @@ module "db_credentials" {
 }
 
 # -----------------------------------------------------------------------------------------
+# Cloudwatch logs for Batch job
+# -----------------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "batch_logs" {
+  name              = "/aws/batch/job"
+  retention_in_days = 7
+}
+
+# -----------------------------------------------------------------------------------------
 # Redshift Configuration
 # -----------------------------------------------------------------------------------------
 
@@ -217,7 +236,7 @@ module "redshift_serverless" {
 # -----------------------------------------------------------------------------------------
 
 resource "aws_batch_compute_environment" "batch_compute" {
-  name = "batch-compute"  
+  name = "batch-compute"
   compute_resources {
     max_vcpus = 16
 
@@ -280,16 +299,8 @@ resource "aws_batch_job_definition" "batch_job_definition" {
         value = "records"
       },
       {
-        name  = "REDSHIFT_USER"
-        value = tostring(data.vault_generic_secret.redshift.data["username"])
-      },
-      {
-        name  = "REDSHIFT_PASSWORD"
-        value = tostring(data.vault_generic_secret.redshift.data["password"])
-      },
-      {
         name  = "REDSHIFT_HOST"
-        value = ""
+        value = module.redshift_serverless.endpoint
       },
       {
         name  = "REDSHIFT_PORT"
@@ -312,12 +323,13 @@ resource "aws_batch_job_definition" "batch_job_definition" {
     logConfiguration = {
       logDriver = "awslogs",
       options = {
-        "awslogs-group"         = "/aws/batch/job",
+        "awslogs-group"         = "${aws_cloudwatch_log_group.batch_logs.name}",
         "awslogs-region"        = "us-east-1",
         "awslogs-stream-prefix" = "ecs"
       }
     }
   })
+  depends_on = [aws_cloudwatch_log_group.batch_logs]
 }
 
 resource "aws_batch_job_queue" "batch_job_queue" {
