@@ -54,31 +54,6 @@ module "vpc" {
 }
 
 # Security Group
-module "security_group" {
-  source = "./modules/vpc/security_groups"
-  vpc_id = module.vpc.vpc_id
-  name   = "security-group"
-  ingress = [
-    {
-      from_port       = 0
-      to_port         = 0
-      protocol        = "tcp"
-      self            = "false"
-      cidr_blocks     = ["0.0.0.0/0"]
-      security_groups = []
-      description     = "any"
-    }
-  ]
-  egress = [
-    {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
-}
-
 resource "aws_security_group" "security_group" {
   name   = "security-group"
   vpc_id = module.vpc.vpc_id
