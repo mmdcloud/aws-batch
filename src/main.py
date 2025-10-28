@@ -99,7 +99,7 @@ def write_news_to_redshift(articles: List[Dict], redshift_config: Dict):
 
 # Example Usage
 if __name__ == "__main__":
-    NEWSAPI_KEY = "14411238a52d4395b1f5a73c0ab7dfaa"
+    NEWSAPI_KEY = ""
     REDSHIFT_CONFIG = {
         "dbname": os.getenv("REDSHIFT_DBNAME"),
         "user": os.getenv("REDSHIFT_USER"),

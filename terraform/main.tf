@@ -1,8 +1,6 @@
-
 # -----------------------------------------------------------------------------------------
 # Registering vault provider 
 # -----------------------------------------------------------------------------------------
-
 data "vault_generic_secret" "redshift" {
   path = "secret/redshift"
 }
@@ -10,7 +8,6 @@ data "vault_generic_secret" "redshift" {
 # -----------------------------------------------------------------------------------------
 # IAM role for batch 
 # -----------------------------------------------------------------------------------------
-
 data "aws_iam_policy_document" "batch_assume_role" {
   statement {
     effect = "Allow"
@@ -25,7 +22,7 @@ data "aws_iam_policy_document" "batch_assume_role" {
 }
 
 resource "aws_iam_role" "aws_batch_service_role" {
-  name               = "aws_batch_service_role"
+  name               = "aws-batch-service-role"
   assume_role_policy = data.aws_iam_policy_document.batch_assume_role.json
 }
 
@@ -37,14 +34,23 @@ resource "aws_iam_role_policy_attachment" "aws_batch_service_role" {
 # -----------------------------------------------------------------------------------------
 # VPC Configuration
 # -----------------------------------------------------------------------------------------
-
 module "vpc" {
-  source                = "./modules/vpc/vpc"
-  vpc_name              = "vpc"
-  vpc_cidr_block        = "10.0.0.0/16"
-  enable_dns_hostnames  = true
-  enable_dns_support    = true
-  internet_gateway_name = "vpc_igw"
+  source                  = "./modules/vpc"
+  vpc_name                = "vpc"
+  vpc_cidr                = "10.0.0.0/16"
+  azs                     = var.azs
+  public_subnets          = var.public_subnets
+  private_subnets         = var.private_subnets
+  enable_dns_hostnames    = true
+  enable_dns_support      = true
+  create_igw              = true
+  map_public_ip_on_launch = true
+  enable_nat_gateway      = false
+  single_nat_gateway      = false
+  one_nat_gateway_per_az  = false
+  tags = {
+    Project = "newsapp-batch"
+  }
 }
 
 # Security Group
@@ -73,104 +79,56 @@ module "security_group" {
   ]
 }
 
-# Redshift Security Group
-module "redshift_sg" {
-  source = "./modules/vpc/security_groups"
+resource "aws_security_group" "security_group" {
+  name   = "security-group"
   vpc_id = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "security-group"
+  }
+}
+
+resource "aws_security_group" "redshift_sg" {
   name   = "redshift-sg"
-  ingress = [
-    {
-      from_port       = 5439
-      to_port         = 5439
-      protocol        = "tcp"
-      self            = "false"
-      cidr_blocks     = ["0.0.0.0/0"]
-      security_groups = []
-      description     = "any"
-    }
-  ]
-  egress = [
-    {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
-}
-
-# Public Subnets
-module "public_subnets" {
-  source = "./modules/vpc/subnets"
-  name   = "public-subnet"
-  subnets = [
-    {
-      subnet = "10.0.1.0/24"
-      az     = "us-east-1a"
-    },
-    {
-      subnet = "10.0.2.0/24"
-      az     = "us-east-1b"
-    },
-    {
-      subnet = "10.0.3.0/24"
-      az     = "us-east-1c"
-    }
-  ]
-  vpc_id                  = module.vpc.vpc_id
-  map_public_ip_on_launch = true
-}
-
-# Private Subnets
-module "private_subnets" {
-  source = "./modules/vpc/subnets"
-  name   = "private-subnet"
-  subnets = [
-    {
-      subnet = "10.0.6.0/24"
-      az     = "us-east-1c"
-    },
-    {
-      subnet = "10.0.5.0/24"
-      az     = "us-east-1b"
-    },
-    {
-      subnet = "10.0.4.0/24"
-      az     = "us-east-1a"
-    }
-  ]
-  vpc_id                  = module.vpc.vpc_id
-  map_public_ip_on_launch = false
-}
-
-# Public Route Table
-module "public_rt" {
-  source  = "./modules/vpc/route_tables"
-  name    = "public-route-table"
-  subnets = module.public_subnets.subnets[*]
-  routes = [
-    {
-      cidr_block     = "0.0.0.0/0"
-      nat_gateway_id = ""
-      gateway_id     = module.vpc.igw_id
-    }
-  ]
   vpc_id = module.vpc.vpc_id
-}
 
-# Private Route Table
-module "private_rt" {
-  source  = "./modules/vpc/route_tables"
-  name    = "private-route-table"
-  subnets = module.private_subnets.subnets[*]
-  routes  = []
-  vpc_id  = module.vpc.vpc_id
+  ingress {
+    description = "Redshift Security Group"
+    from_port   = 5439
+    to_port     = 5439
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "security-group"
+  }
 }
 
 # -----------------------------------------------------------------------------------------
 # ECR Configuration
 # -----------------------------------------------------------------------------------------
-
 module "ecr" {
   source               = "./modules/ecr"
   force_delete         = true
@@ -183,7 +141,6 @@ module "ecr" {
 # -----------------------------------------------------------------------------------------
 # Secrets Manager
 # -----------------------------------------------------------------------------------------
-
 module "db_credentials" {
   source                  = "./modules/secrets-manager"
   name                    = "rds-secrets"
@@ -198,7 +155,6 @@ module "db_credentials" {
 # -----------------------------------------------------------------------------------------
 # Cloudwatch logs for Batch job
 # -----------------------------------------------------------------------------------------
-
 resource "aws_cloudwatch_log_group" "batch_logs" {
   name              = "/aws/batch/job"
   retention_in_days = 7
@@ -207,7 +163,6 @@ resource "aws_cloudwatch_log_group" "batch_logs" {
 # -----------------------------------------------------------------------------------------
 # Redshift Configuration
 # -----------------------------------------------------------------------------------------
-
 module "redshift_serverless" {
   source              = "./modules/redshift"
   namespace_name      = "batch-namespace"
@@ -234,9 +189,8 @@ module "redshift_serverless" {
 # -----------------------------------------------------------------------------------------
 # Batch Configuration
 # -----------------------------------------------------------------------------------------
-
 resource "aws_batch_compute_environment" "batch_compute" {
-  name = "batch-compute"
+  # name = "batch-compute"
   compute_resources {
     max_vcpus = 16
 
